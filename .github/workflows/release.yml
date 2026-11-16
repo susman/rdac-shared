@@ -1,0 +1,54 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish-zig-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Create package tarball
+        id: tarball
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          archive="${RUNNER_TEMP}/rdac-shared-${tag}.tar.gz"
+          tar --exclude=.git \
+            --exclude=.github \
+            --exclude=.gitignore \
+            --exclude=.gitmodules \
+            --exclude=AGENTS.md \
+            -czf "${archive}" -C "${GITHUB_WORKSPACE}" .
+
+          echo "path=${archive}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and test
+        run: |
+          zig build
+          zig build test
+
+      - name: Validate package
+        run: zig fetch "${{ steps.tarball.outputs.path }}" > /dev/null
+
+      - name: Publish release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          gh release create "${tag}" --verify-tag --generate-notes \
+            "${{ steps.tarball.outputs.path }}" \
+          || gh release upload "${tag}" "${{ steps.tarball.outputs.path }}" --clobber
